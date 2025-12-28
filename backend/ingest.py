@@ -5,7 +5,7 @@ from langchain_community.document_loaders import TextLoader, PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 # Import shared components from rag.py to avoid locking issues
-from rag import qdrant_client, embeddings, sparse_embeddings
+from .rag import qdrant_client, embeddings, sparse_embeddings
 
 splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=250)
 
