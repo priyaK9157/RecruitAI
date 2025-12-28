@@ -1,0 +1,69 @@
+import os
+import shutil
+from typing import List
+from fastapi import FastAPI, UploadFile, File, BackgroundTasks, HTTPException
+from pydantic import BaseModel
+from openai import OpenAI
+from dotenv import load_dotenv
+
+from rag import retrieve
+from ingest import ingest_folder
+
+load_dotenv()
+client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
+app = FastAPI()
+
+class Question(BaseModel):
+    query: str
+
+@app.post("/upload")
+async def upload_documents(background_tasks: BackgroundTasks, files: List[UploadFile] = File(...)):
+    upload_path = "../data/resumes"
+    os.makedirs(upload_path, exist_ok=True)
+    
+    try:
+        for file in files:
+            file_location = os.path.join(upload_path, file.filename)
+            with open(file_location, "wb+") as f_obj:
+                shutil.copyfileobj(file.file, f_obj)
+        
+        background_tasks.add_task(ingest_folder, upload_path, "resume")
+        return {"message": "Files uploaded. Indexing started in background."}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/ask")
+async def ask(question: Question):
+    # 1. Retrieve the top context chunks
+    data = retrieve(question.query)
+    context = data.get("context", "")
+    
+    if not context.strip():
+        return {"answer": "I'm sorry, I couldn't find any relevant information in the uploaded resumes.", "sources": []}
+
+    # 2. Optimized Prompt for "Keyword Extraction" and "Candidate Comparison"
+    # This forces the LLM to look for specific tech like FastAPI
+    system_instruction = (
+        "You are an Expert Technical Recruiter assistant. "
+        "Your goal is to answer questions using ONLY the provided context. "
+        "Be very specific. If a candidate mentions a specific tool (like FastAPI, React, or SQL), "
+        "mention it by name. Always identify candidates by their full names. "
+        "If the context contains multiple resumes, compare them clearly."
+    )
+
+    try:
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": system_instruction},
+                {"role": "user", "content": f"CONTEXT FROM RESUMES:\n{context}\n\nUSER QUERY: {question.query}"}
+            ],
+            temperature=0  # Keeping it deterministic for accuracy
+        )
+        
+        return {
+            "answer": response.choices[0].message.content, 
+            "sources": data["sources"]
+        }
+    except Exception as e:
+        return {"answer": f"Error during generation: {str(e)}", "sources": []}

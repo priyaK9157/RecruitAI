@@ -1,0 +1,10 @@
+fastapi
+uvicorn
+openai
+tenacity
+chromadb
+sentence-transformers
+langchain
+streamlit
+requests
+python-dotenv
