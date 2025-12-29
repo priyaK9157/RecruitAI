@@ -1,42 +1,76 @@
 import os
-from qdrant_client import QdrantClient
-from langchain_openai import OpenAIEmbeddings
-from langchain_qdrant import QdrantVectorStore, FastEmbedSparse, RetrievalMode
+import shutil
+from typing import List
+from fastapi import FastAPI, UploadFile, File, BackgroundTasks, HTTPException
+from pydantic import BaseModel
+from openai import OpenAI
 from dotenv import load_dotenv
 
+# --- MOVED: Local imports removed from here to prevent startup timeout ---
+
 load_dotenv()
+client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
+app = FastAPI()
 
-# Global client and dense embeddings are fine (they don't download large local files)
-qdrant_client = QdrantClient(
-    url=os.getenv("QDRANT_URL"), 
-    api_key=os.getenv("QDRANT_API_KEY")
-)
+class Question(BaseModel):
+    query: str
 
-dense_embeddings = OpenAIEmbeddings(model="text-embedding-3-small")
+@app.get("/")
+def health_check():
+    return {"status": "alive", "message": "Backend is running!"}
 
-# --- REMOVED sparse_embeddings from here ---
-
-def retrieve(query, k=10):
+@app.post("/upload")
+async def upload_documents(background_tasks: BackgroundTasks, files: List[UploadFile] = File(...)):
+    # Lazy Import inside the function
+    from .ingest import ingest_folder
+    
+    upload_path = "../data/hiring_assistant"
+    os.makedirs(upload_path, exist_ok=True)
+    
     try:
-        # 1. Lazy Load the sparse embeddings INSIDE the function
-        sparse_embeddings = FastEmbedSparse(model_name="Qdrant/bm25")
+        for file in files:
+            file_location = os.path.join(upload_path, file.filename)
+            with open(file_location, "wb+") as f_obj:
+                shutil.copyfileobj(file.file, f_obj)
+        
+        background_tasks.add_task(ingest_folder, upload_path, "hiring_assistant")
+        return {"message": "Files uploaded. Indexing started in background."}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
-        collections = qdrant_client.get_collections().collections
-        if not any(c.name == "hiring_assistant" for c in collections):
-            return {"context": "", "sources": []}
+@app.post("/ask")
+async def ask(question: Question):
+    # Lazy Import inside the function
+    from .rag import retrieve
+    
+    # 1. Retrieve the top context chunks
+    data = retrieve(question.query)
+    context = data.get("context", "")
+    
+    if not context.strip():
+        return {"answer": "I'm sorry, I couldn't find any relevant information in the uploaded resumes.", "sources": []}
 
-        # 2. Use the local sparse_embeddings here
-        vectorstore = QdrantVectorStore(
-            client=qdrant_client,
-            collection_name="hiring_assistant",
-            embedding=dense_embeddings,
-            sparse_embedding=sparse_embeddings,
-            retrieval_mode=RetrievalMode.HYBRID
+    system_instruction = (
+        "You are an Expert Technical Recruiter assistant. "
+        "Your goal is to answer questions using ONLY the provided context. "
+        "Be very specific. If a candidate mentions a specific tool (like FastAPI, React, or SQL), "
+        "mention it by name. Always identify candidates by their full names. "
+        "If the context contains multiple resumes, compare them clearly."
+    )
+
+    try:
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": system_instruction},
+                {"role": "user", "content": f"CONTEXT FROM RESUMES:\n{context}\n\nUSER QUERY: {question.query}"}
+            ],
+            temperature=0
         )
         
-        results = vectorstore.similarity_search(query, k=k)
-        context = "\n---\n".join([d.page_content for d in results])
-        sources = list(set([d.metadata.get("source", "Unknown") for d in results]))
-        return {"context": context, "sources": sources}
+        return {
+            "answer": response.choices[0].message.content, 
+            "sources": data["sources"]
+        }
     except Exception as e:
-        return {"error": str(e), "context": "", "sources": []}
+        return {"answer": f"Error during generation: {str(e)}", "sources": []}
