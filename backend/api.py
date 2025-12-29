@@ -1,4 +1,3 @@
-# backend/api.py
 import os
 import shutil
 import tempfile
@@ -13,10 +12,8 @@ load_dotenv()
 client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
 app = FastAPI()
 
-# --- CORS CONFIG ---
 origins = [
     "https://recruitai-xguc3nypm6ujpcluzm8dhy.streamlit.app",
-    "http://localhost:8501", 
 ]
 
 app.add_middleware(
@@ -48,8 +45,6 @@ async def upload_documents(background_tasks: BackgroundTasks, files: List[Upload
             with open(file_location, "wb+") as f_obj:
                 shutil.copyfileobj(file.file, f_obj)
         
-        # We pass the temp_dir to the background task
-        # IMPORTANT: The background task MUST delete this folder when done
         background_tasks.add_task(ingest_folder, temp_dir, "resume")
         
         return {"message": f"Successfully received {len(files)} files. Indexing in progress."}
