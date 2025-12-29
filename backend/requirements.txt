@@ -9,3 +9,4 @@ python-dotenv
 pypdf
 fastembed
 python-multipart
+qdrant-client
