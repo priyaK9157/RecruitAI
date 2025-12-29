@@ -1,10 +1,12 @@
 fastapi
 uvicorn
 openai
+qdrant-client
 tenacity
-chromadb
-sentence-transformers
 langchain
+langchain-openai
 streamlit
 requests
 python-dotenv
+pypdf
+sentence-transformers
