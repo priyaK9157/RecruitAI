@@ -6,7 +6,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# Global client and dense embeddings are fine (they don't download large local files)
+# Use a singleton pattern for the client to avoid reconnecting every request
 qdrant_client = QdrantClient(
     url=os.getenv("QDRANT_URL"), 
     api_key=os.getenv("QDRANT_API_KEY")
@@ -14,18 +14,23 @@ qdrant_client = QdrantClient(
 
 dense_embeddings = OpenAIEmbeddings(model="text-embedding-3-small")
 
-# --- REMOVED sparse_embeddings from here ---
+# --- GLOBAL MODEL CACHE ---
+# On Render, re-downloading the model inside the function causes a timeout.
+# We initialize it once at the top level.
+try:
+    sparse_embeddings = FastEmbedSparse(model_name="Qdrant/bm25")
+except Exception as e:
+    print(f"Warning: Could not pre-load sparse embeddings: {e}")
+    sparse_embeddings = None
 
-def retrieve(query, k=10):
+def retrieve(query, k=5): # Reduced k to 5 to save tokens/memory on Render
     try:
-        # 1. Lazy Load the sparse embeddings INSIDE the function
-        sparse_embeddings = FastEmbedSparse(model_name="Qdrant/bm25")
-
+        # Check if collection even exists before searching
         collections = qdrant_client.get_collections().collections
         if not any(c.name == "hiring_assistant" for c in collections):
-            return {"context": "", "sources": []}
+            return {"context": "", "sources": [], "error": "Knowledge base is empty. Please upload files."}
 
-        # 2. Use the local sparse_embeddings here
+        # Initialize VectorStore
         vectorstore = QdrantVectorStore(
             client=qdrant_client,
             collection_name="hiring_assistant",
@@ -34,9 +39,17 @@ def retrieve(query, k=10):
             retrieval_mode=RetrievalMode.HYBRID
         )
         
+        # Perform Search
         results = vectorstore.similarity_search(query, k=k)
+        
+        if not results:
+            return {"context": "", "sources": []}
+
         context = "\n---\n".join([d.page_content for d in results])
         sources = list(set([d.metadata.get("source", "Unknown") for d in results]))
+        
         return {"context": context, "sources": sources}
+        
     except Exception as e:
+        # Return the actual error to the frontend for debugging
         return {"error": str(e), "context": "", "sources": []}
