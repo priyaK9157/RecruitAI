@@ -6,8 +6,7 @@ from pydantic import BaseModel
 from openai import OpenAI
 from dotenv import load_dotenv
 
-from .rag import retrieve
-from .ingest import ingest_folder
+# --- MOVED: Local imports removed from here to prevent startup timeout ---
 
 load_dotenv()
 client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
@@ -16,8 +15,15 @@ app = FastAPI()
 class Question(BaseModel):
     query: str
 
+@app.get("/")
+def health_check():
+    return {"status": "alive", "message": "Backend is running!"}
+
 @app.post("/upload")
 async def upload_documents(background_tasks: BackgroundTasks, files: List[UploadFile] = File(...)):
+    # Lazy Import inside the function
+    from .ingest import ingest_folder
+    
     upload_path = "../data/resumes"
     os.makedirs(upload_path, exist_ok=True)
     
@@ -34,6 +40,9 @@ async def upload_documents(background_tasks: BackgroundTasks, files: List[Upload
 
 @app.post("/ask")
 async def ask(question: Question):
+    # Lazy Import inside the function
+    from .rag import retrieve
+    
     # 1. Retrieve the top context chunks
     data = retrieve(question.query)
     context = data.get("context", "")
@@ -41,8 +50,6 @@ async def ask(question: Question):
     if not context.strip():
         return {"answer": "I'm sorry, I couldn't find any relevant information in the uploaded resumes.", "sources": []}
 
-    # 2. Optimized Prompt for "Keyword Extraction" and "Candidate Comparison"
-    # This forces the LLM to look for specific tech like FastAPI
     system_instruction = (
         "You are an Expert Technical Recruiter assistant. "
         "Your goal is to answer questions using ONLY the provided context. "
@@ -58,7 +65,7 @@ async def ask(question: Question):
                 {"role": "system", "content": system_instruction},
                 {"role": "user", "content": f"CONTEXT FROM RESUMES:\n{context}\n\nUSER QUERY: {question.query}"}
             ],
-            temperature=0  # Keeping it deterministic for accuracy
+            temperature=0
         )
         
         return {
