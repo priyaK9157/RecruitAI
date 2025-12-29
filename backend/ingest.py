@@ -1,20 +1,23 @@
 import os
 from qdrant_client.http import models as rest
-from langchain_qdrant import QdrantVectorStore, RetrievalMode
+# Add FastEmbedSparse to this import line
+from langchain_qdrant import QdrantVectorStore, RetrievalMode, FastEmbedSparse 
 from langchain_community.document_loaders import TextLoader, PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
-# Import shared components from rag.py to avoid locking issues
-from .rag import qdrant_client, embeddings, sparse_embeddings
+# 1. Update this to only import the shared client and dense embeddings
+from .rag import qdrant_client, dense_embeddings
 
 splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=250)
 
 def ingest_folder(folder_path: str, doc_type: str):
+    # 2. Lazy Load the sparse model here so the server starts fast!
+    sparse_embeddings = FastEmbedSparse(model_name="Qdrant/bm25")
+
     if not os.path.exists(folder_path):
         print(f"Folder {folder_path} does not exist.")
         return
     
-    # --- FIX 1: Initialize documents list at the start ---
     all_docs = []
     
     files = [f for f in os.listdir(folder_path) if f.endswith((".pdf", ".txt"))]
@@ -33,7 +36,6 @@ def ingest_folder(folder_path: str, doc_type: str):
         chunks = splitter.split_documents(all_docs)
         collection_name = "hiring_assistant"
         
-        # --- FIX 2: Ensure collection exists with LangChain-compatible naming ---
         try:
             collections = qdrant_client.get_collections().collections
             exists = any(c.name == collection_name for c in collections)
@@ -43,19 +45,20 @@ def ingest_folder(folder_path: str, doc_type: str):
                 qdrant_client.create_collection(
                     collection_name=collection_name,
                     vectors_config=rest.VectorParams(
-                        size=1536, # Size for OpenAI text-embedding-3-small
+                        size=1536, 
                         distance=rest.Distance.COSINE
                     ),
+                    # Ensure this matches your retrieval configuration
                     sparse_vectors_config={
                         "langchain-sparse": rest.SparseVectorParams()
                     }
                 )
 
-            # --- FIX 3: Initialize with correct sparse_vector_name ---
+            # 3. Use 'dense_embeddings' and 'sparse_embeddings' correctly here
             vectorstore = QdrantVectorStore(
                 client=qdrant_client,
                 collection_name=collection_name,
-                embedding=embeddings,
+                embedding=dense_embeddings, # Renamed from 'embeddings' to match rag.py
                 sparse_embedding=sparse_embeddings,
                 sparse_vector_name="langchain-sparse",
                 retrieval_mode=RetrievalMode.HYBRID
