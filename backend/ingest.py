@@ -1,17 +1,13 @@
 import os
-from qdrant_client.http import models as rest
-# Add FastEmbedSparse to this import line
 from langchain_qdrant import QdrantVectorStore, RetrievalMode, FastEmbedSparse 
 from langchain_community.document_loaders import TextLoader, PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-
-# 1. Update this to only import the shared client and dense embeddings
 from .rag import qdrant_client, dense_embeddings
 
 splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=250)
 
 def ingest_folder(folder_path: str, doc_type: str):
-    # 2. Lazy Load the sparse model here so the server starts fast!
+    # 1. Initialize sparse model
     sparse_embeddings = FastEmbedSparse(model_name="Qdrant/bm25")
 
     if not os.path.exists(folder_path):
@@ -19,55 +15,44 @@ def ingest_folder(folder_path: str, doc_type: str):
         return
     
     all_docs = []
-    
     files = [f for f in os.listdir(folder_path) if f.endswith((".pdf", ".txt"))]
+    
     for file in files:
         file_path = os.path.join(folder_path, file)
         try:
             loader = PyPDFLoader(file_path) if file.endswith(".pdf") else TextLoader(file_path, encoding="utf-8")
             loaded_docs = loader.load()
+            
+            # Verify if text was actually found
+            if not loaded_docs or all(not d.page_content.strip() for d in loaded_docs):
+                print(f"⚠️ Warning: No text found in {file}. It might be a scanned image.")
+                continue
+                
             for doc in loaded_docs:
                 doc.metadata = {"source": file, "type": doc_type}
             all_docs.extend(loaded_docs)
         except Exception as e:
-            print(f"Error loading {file}: {e}")
+            print(f"❌ Error loading {file}: {e}")
 
     if all_docs:
         chunks = splitter.split_documents(all_docs)
-        collection_name = "hiring_assistant"
+        collection_name = "hiring_assistant" # <--- ENSURE THIS MATCHES RAG.PY
         
         try:
-            collections = qdrant_client.get_collections().collections
-            exists = any(c.name == collection_name for c in collections)
-            
-            if not exists:
-                print(f"Creating collection: {collection_name}")
-                qdrant_client.create_collection(
-                    collection_name=collection_name,
-                    vectors_config=rest.VectorParams(
-                        size=1536, 
-                        distance=rest.Distance.COSINE
-                    ),
-                    # Ensure this matches your retrieval configuration
-                    sparse_vectors_config={
-                        "langchain-sparse": rest.SparseVectorParams()
-                    }
-                )
-
-            # 3. Use 'dense_embeddings' and 'sparse_embeddings' correctly here
-            vectorstore = QdrantVectorStore(
+            # 2. Use from_documents for a cleaner, unified ingestion
+            # This handles the collection creation and sparse/dense config automatically
+            QdrantVectorStore.from_documents(
+                chunks,
+                dense_embeddings,
                 client=qdrant_client,
                 collection_name=collection_name,
-                embedding=dense_embeddings, # Renamed from 'embeddings' to match rag.py
                 sparse_embedding=sparse_embeddings,
                 sparse_vector_name="langchain-sparse",
-                retrieval_mode=RetrievalMode.HYBRID
+                retrieval_mode=RetrievalMode.HYBRID,
             )
-            
-            vectorstore.add_documents(chunks)
-            print(f"✅ Successfully indexed {len(chunks)} chunks.")
+            print(f"✅ Successfully indexed {len(chunks)} chunks into {collection_name}.")
             
         except Exception as e:
             print(f"❌ Error during Qdrant indexing: {e}")
     else:
-        print("No documents were found to index.")
+        print("No readable documents were found to index.")
