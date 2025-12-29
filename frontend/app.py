@@ -1,7 +1,12 @@
 import streamlit as st
 import requests
 import time
+import os
+from dotenv import load_dotenv
 
+load_dotenv()
+
+BACKEND_URL = os.getenv("BACKEND_URL")
 # --- THEME & STYLE ---
 st.set_page_config(page_title="RecruitAI | Dashboard", page_icon="🎯", layout="centered")
 
@@ -52,7 +57,7 @@ with st.sidebar:
             with st.status("Reading files...", expanded=False) as status:
                 files = [("files", (f.name, f.getvalue())) for f in uploaded_files]
                 try:
-                    res = requests.post("http://localhost:8000/upload", files=files)
+                    res = requests.post(f"{BACKEND_URL}/upload", files=files)
                     if res.status_code == 200:
                         status.update(label="Index updated!", state="complete", expanded=False)
                         st.toast("Resumes added successfully!", icon="✅")
@@ -101,7 +106,7 @@ if prompt := st.chat_input("Message your assistant..."):
         # Human touch: A slight "thinking" delay feels more natural
         with st.spinner("Thinking..."):
             try:
-                res = requests.post("http://localhost:8000/ask", json={"query": prompt})
+                res = requests.post(f"{BACKEND_URL}/ask", json={"query": prompt})
                 if res.status_code == 200:
                     data = res.json()
                     full_response = data.get("answer", "I'm not sure.")
