@@ -3,11 +3,8 @@ import shutil
 from langchain_qdrant import QdrantVectorStore, RetrievalMode, FastEmbedSparse 
 from langchain_community.document_loaders import TextLoader, PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-
-# Import shared embeddings from your rag.py
 from rag import dense_embeddings
 
-# Setup paths
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DEFAULT_DATA_DIR = os.path.join(BASE_DIR, "data", "hiring_assistant")
 
