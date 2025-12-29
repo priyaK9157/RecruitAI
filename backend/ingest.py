@@ -11,42 +11,32 @@ DEFAULT_DATA_DIR = os.path.join(BASE_DIR, "data", "hiring_assistant")
 splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=250)
 
 def ingest_folder(folder_path: str = None, doc_type: str = "resume"):
-    # Use default path if none provided
     path_to_process = folder_path if folder_path else DEFAULT_DATA_DIR
-    
     print(f"🛠️ Starting ingestion from: {path_to_process}")
     
-    # 1. Initialize sparse model (Lazy load inside function to save RAM on start)
+    # Lazy load sparse model to save RAM
     sparse_embeddings = FastEmbedSparse(model_name="Qdrant/bm25")
 
     if not os.path.exists(path_to_process):
         os.makedirs(path_to_process, exist_ok=True)
-        print(f"⚠️ Folder was missing, created it: {path_to_process}")
         return
     
     all_docs = []
     files = [f for f in os.listdir(path_to_process) if f.endswith((".pdf", ".txt"))]
-    print(f"📂 Files found in directory: {files}")
+    print(f"📂 Files found: {files}")
     
     for file in files:
         file_path = os.path.join(path_to_process, file)
         try:
-            # Better PDF Loading for Render
             if file.endswith(".pdf"):
                 loader = PyPDFLoader(file_path)
             else:
                 loader = TextLoader(file_path, encoding="utf-8")
                 
             loaded_docs = loader.load()
-            
-            if not loaded_docs or all(not d.page_content.strip() for d in loaded_docs):
-                print(f"⚠️ Warning: {file} is empty or unreadable (scanned?).")
-                continue
-                
             for doc in loaded_docs:
                 doc.metadata = {"source": file, "type": doc_type}
             all_docs.extend(loaded_docs)
-            
         except Exception as e:
             print(f"❌ Error loading {file}: {e}")
 
@@ -55,19 +45,20 @@ def ingest_folder(folder_path: str = None, doc_type: str = "resume"):
         collection_name = "hiring_assistant"
         
         try:
-            # Sync with rag.py configuration
+            # ✅ FIX 2: Correct initialization for Hybrid Search
+            # We use the existing client object from rag.py
             QdrantVectorStore.from_documents(
-                chunks,
-                dense_embeddings,
-                client=qdrant_client,
+                documents=chunks,
+                embedding=dense_embeddings, # Dense
+                client=qdrant_client,       # Our pre-configured client
                 collection_name=collection_name,
-                sparse_embedding=sparse_embeddings,
-                sparse_vector_name="langchain-sparse", # Must match retrieve()
+                sparse_embedding=sparse_embeddings, # Sparse
+                sparse_vector_name="langchain-sparse",
                 retrieval_mode=RetrievalMode.HYBRID,
             )
-            print(f"✅ Indexed {len(chunks)} chunks into Qdrant.")
+            print(f"✅ Indexed {len(chunks)} chunks.")
             
         except Exception as e:
             print(f"❌ Qdrant Indexing Failed: {e}")
-    else:
-        print("❌ Ingestion aborted: No readable documents found.")
+            # If 'client' still fails, it's a version conflict. 
+            # Check your requirements.txt for langchain-qdrant==0.2.0
