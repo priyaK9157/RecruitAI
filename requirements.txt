@@ -2,7 +2,6 @@ fastapi
 uvicorn
 openai
 qdrant-client
-langchain
 langchain-openai
 langchain-qdrant
 langchain-community
@@ -10,5 +9,4 @@ streamlit
 python-dotenv
 pypdf
 fastembed
-sentence-transformers
 python-multipart
