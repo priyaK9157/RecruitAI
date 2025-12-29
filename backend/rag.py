@@ -6,30 +6,30 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-DB_DIR = os.path.join(os.path.dirname(__file__), "../qdrant_storage")
-
-# Create ONE global client instance
-# qdrant_client = QdrantClient(path=DB_DIR)
-# From this: qdrant_client = QdrantClient(path=DB_DIR)
-# To this:
+# Global client and dense embeddings are fine (they don't download large local files)
 qdrant_client = QdrantClient(
     url=os.getenv("QDRANT_URL"), 
     api_key=os.getenv("QDRANT_API_KEY")
 )
 
-embeddings = OpenAIEmbeddings(model="text-embedding-3-small")
-sparse_embeddings = FastEmbedSparse(model_name="Qdrant/bm25")
+dense_embeddings = OpenAIEmbeddings(model="text-embedding-3-small")
+
+# --- REMOVED sparse_embeddings from here ---
 
 def retrieve(query, k=10):
     try:
+        # 1. Lazy Load the sparse embeddings INSIDE the function
+        sparse_embeddings = FastEmbedSparse(model_name="Qdrant/bm25")
+
         collections = qdrant_client.get_collections().collections
         if not any(c.name == "hiring_assistant" for c in collections):
             return {"context": "", "sources": []}
 
+        # 2. Use the local sparse_embeddings here
         vectorstore = QdrantVectorStore(
-            client=qdrant_client, # Use the shared client
+            client=qdrant_client,
             collection_name="hiring_assistant",
-            embedding=embeddings,
+            embedding=dense_embeddings,
             sparse_embedding=sparse_embeddings,
             retrieval_mode=RetrievalMode.HYBRID
         )
