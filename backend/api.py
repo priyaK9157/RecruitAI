@@ -2,15 +2,29 @@ import os
 import shutil
 from typing import List
 from fastapi import FastAPI, UploadFile, File, BackgroundTasks, HTTPException
+from fastapi.middleware.cors import CORSMiddleware  # 1. Import this
 from pydantic import BaseModel
 from openai import OpenAI
 from dotenv import load_dotenv
 
-# --- MOVED: Local imports removed from here to prevent startup timeout ---
-
 load_dotenv()
 client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
 app = FastAPI()
+
+# --- 2. ADD THIS CORS SECTION ---
+origins = [
+    "https://recruitai-xguc3nypm6ujpcluzm8dhy.streamlit.app",
+    "http://localhost:8501", # Useful for local testing
+]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+# -------------------------------
 
 class Question(BaseModel):
     query: str
@@ -24,7 +38,7 @@ async def upload_documents(background_tasks: BackgroundTasks, files: List[Upload
     # Lazy Import inside the function
     from .ingest import ingest_folder
     
-    upload_path = "../data/resumes"
+    upload_path = "../data/hiring_assistant"
     os.makedirs(upload_path, exist_ok=True)
     
     try:
@@ -33,7 +47,7 @@ async def upload_documents(background_tasks: BackgroundTasks, files: List[Upload
             with open(file_location, "wb+") as f_obj:
                 shutil.copyfileobj(file.file, f_obj)
         
-        background_tasks.add_task(ingest_folder, upload_path, "resume")
+        background_tasks.add_task(ingest_folder, upload_path, "hiring_assistant")
         return {"message": "Files uploaded. Indexing started in background."}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
