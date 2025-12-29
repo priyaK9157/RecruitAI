@@ -6,7 +6,6 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# Use a singleton pattern for the client to avoid reconnecting every request
 qdrant_client = QdrantClient(
     url=os.getenv("QDRANT_URL"), 
     api_key=os.getenv("QDRANT_API_KEY")
@@ -14,9 +13,6 @@ qdrant_client = QdrantClient(
 
 dense_embeddings = OpenAIEmbeddings(model="text-embedding-3-small")
 
-# --- GLOBAL MODEL CACHE ---
-# On Render, re-downloading the model inside the function causes a timeout.
-# We initialize it once at the top level.
 try:
     sparse_embeddings = FastEmbedSparse(model_name="Qdrant/bm25")
 except Exception as e:
