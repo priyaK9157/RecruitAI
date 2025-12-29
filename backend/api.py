@@ -1,8 +1,10 @@
+# backend/api.py
 import os
 import shutil
+import tempfile
 from typing import List
 from fastapi import FastAPI, UploadFile, File, BackgroundTasks, HTTPException
-from fastapi.middleware.cors import CORSMiddleware  # 1. Import this
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from openai import OpenAI
 from dotenv import load_dotenv
@@ -11,10 +13,10 @@ load_dotenv()
 client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
 app = FastAPI()
 
-# --- 2. ADD THIS CORS SECTION ---
+# --- CORS CONFIG ---
 origins = [
     "https://recruitai-xguc3nypm6ujpcluzm8dhy.streamlit.app",
-    "http://localhost:8501", # Useful for local testing
+    "http://localhost:8501", 
 ]
 
 app.add_middleware(
@@ -24,7 +26,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-# -------------------------------
 
 class Question(BaseModel):
     query: str
@@ -35,41 +36,45 @@ def health_check():
 
 @app.post("/upload")
 async def upload_documents(background_tasks: BackgroundTasks, files: List[UploadFile] = File(...)):
-    # Lazy Import inside the function
     from .ingest import ingest_folder
     
-    upload_path = "../data/hiring_assistant"
-    os.makedirs(upload_path, exist_ok=True)
+    # Create a unique temp directory for this upload batch
+    # This prevents files from disappearing or mixing between users
+    temp_dir = tempfile.mkdtemp()
     
     try:
         for file in files:
-            file_location = os.path.join(upload_path, file.filename)
+            file_location = os.path.join(temp_dir, file.filename)
             with open(file_location, "wb+") as f_obj:
                 shutil.copyfileobj(file.file, f_obj)
         
-        background_tasks.add_task(ingest_folder, upload_path, "hiring_assistant")
-        return {"message": "Files uploaded. Indexing started in background."}
+        # We pass the temp_dir to the background task
+        # IMPORTANT: The background task MUST delete this folder when done
+        background_tasks.add_task(ingest_folder, temp_dir, "resume")
+        
+        return {"message": f"Successfully received {len(files)} files. Indexing in progress."}
     except Exception as e:
+        if os.path.exists(temp_dir):
+            shutil.rmtree(temp_dir)
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/ask")
 async def ask(question: Question):
-    # Lazy Import inside the function
     from .rag import retrieve
     
-    # 1. Retrieve the top context chunks
     data = retrieve(question.query)
     context = data.get("context", "")
     
     if not context.strip():
-        return {"answer": "I'm sorry, I couldn't find any relevant information in the uploaded resumes.", "sources": []}
+        # Helpful for debugging Render issues
+        return {
+            "answer": "I couldn't find any information in the database. Please try uploading your resumes again.", 
+            "sources": []
+        }
 
     system_instruction = (
         "You are an Expert Technical Recruiter assistant. "
-        "Your goal is to answer questions using ONLY the provided context. "
-        "Be very specific. If a candidate mentions a specific tool (like FastAPI, React, or SQL), "
-        "mention it by name. Always identify candidates by their full names. "
-        "If the context contains multiple resumes, compare them clearly."
+        "Answer using ONLY the provided context. Identify candidates by full name."
     )
 
     try:
@@ -77,14 +82,10 @@ async def ask(question: Question):
             model="gpt-4o-mini",
             messages=[
                 {"role": "system", "content": system_instruction},
-                {"role": "user", "content": f"CONTEXT FROM RESUMES:\n{context}\n\nUSER QUERY: {question.query}"}
+                {"role": "user", "content": f"CONTEXT:\n{context}\n\nQUERY: {question.query}"}
             ],
             temperature=0
         )
-        
-        return {
-            "answer": response.choices[0].message.content, 
-            "sources": data["sources"]
-        }
+        return {"answer": response.choices[0].message.content, "sources": data["sources"]}
     except Exception as e:
-        return {"answer": f"Error during generation: {str(e)}", "sources": []}
+        return {"answer": f"Generation Error: {str(e)}", "sources": []}
