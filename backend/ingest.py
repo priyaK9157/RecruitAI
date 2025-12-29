@@ -2,7 +2,7 @@ import os
 from langchain_qdrant import QdrantVectorStore, RetrievalMode, FastEmbedSparse 
 from langchain_community.document_loaders import TextLoader, PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from .rag import qdrant_client, dense_embeddings
+from rag import qdrant_client, dense_embeddings
 
 # Use Absolute Paths for Render
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
