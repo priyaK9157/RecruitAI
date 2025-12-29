@@ -36,7 +36,7 @@ def health_check():
 
 @app.post("/upload")
 async def upload_documents(background_tasks: BackgroundTasks, files: List[UploadFile] = File(...)):
-    from .ingest import ingest_folder
+    from ingest import ingest_folder
     
     # Create a unique temp directory for this upload batch
     # This prevents files from disappearing or mixing between users
@@ -60,7 +60,7 @@ async def upload_documents(background_tasks: BackgroundTasks, files: List[Upload
 
 @app.post("/ask")
 async def ask(question: Question):
-    from .rag import retrieve
+    from rag import retrieve
     
     data = retrieve(question.query)
     context = data.get("context", "")
